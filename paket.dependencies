@@ -1,0 +1,14 @@
+framework: netstandard2.0, net471, netcoreapp2.0
+source https://api.nuget.org/v3/index.json
+
+nuget FSharp.Core                           ~> 4.6.2
+nuget FSharp.Data.JsonProvider              ~> 0.5.0
+nuget System.Net.Http                       ~> 4.3.4
+nuget Paket.Core                            ~> 5.215.0
+
+group Build
+framework: net471
+content: none
+source https://api.nuget.org/v3/index.json
+
+github aardvark-platform/aardvark.fake:v4-temp
