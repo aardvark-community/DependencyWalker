@@ -337,69 +337,33 @@ module RepoInfo =
 
 
 [<EntryPoint;STAThread>]
-let main argv = 
-    let scratchFolder = @"C:\Users\Schorsch\Desktop\buildtest"
+let main argv =
+    if argv.Length < 2 then
+        printfn "usage: <repoFolder> <deps>"
+
+
+
+    let scratchFolder = argv.[0] //@"C:\Users\Schorsch\Desktop\buildtest"
 
     let newPackageVersions =
+        let deps = 
+            if File.Exists argv.[1] then DependenciesFile.ReadFromFile(argv.[1])
+            else DependenciesFile.FromSource(argv.[1])
         Map.ofList [
-            "FSharp.Core", VersionRequirement.Parse "[4.3.0, 4.4)"
+            for (KeyValue(_,v)) in deps.Groups do
+                for p in v.Packages do
+                    yield p.Name.Name, p.VersionRequirement
         ]
-
     let log = Log.create ""
 
-    //let repos =
-    //    [
-    //        Repo "krauthaufen/FShade"
-    //        Repo "aardvark-platform/aardvark.base"
-    //        Repo "aardvark-platform/aardvark.rendering"
-    //        Repo "aardvark-platform/aardvark.media"
-    //        Repo "aardvark-platform/aardvark.algodat"
-    //        Repo "aardvark-community/aardvark.vr"
-    //        Repo "aardvark-community/LibTessDotNet"
-    //        Repo "aardvark-community/SplashDotNet"
-    //        Repo "aardvark-community/unofficial.dotspatial.projections"
-    //        Repo "aardvark-community/aardium"
-    //        Repo "aardvark-community/CeresSharp"
-    //        Repo "aardvark-community/MiniCV"
-    //        Repo "aardvark-community/GLSLangSharp"
-    //        Repo "aardvark-community/assimp-net"
-    //        Repo "aardvark-community/Typography"
-    //        Repo "aardvark-community/DevILSharp"
-    //        Repo "aardvark-community/openvr"
-    //    ]
+    log.start "update"
+    for (k,v) in Map.toSeq newPackageVersions do
+        log.line "%s: %s" k (string v)
+    log.stop()
 
+    //Environment.Exit 0
 
-    //let repos = repos |> List.toArray |> Array.collect GithubSource.listRepos
-
-    //log.startTimed "found %d repositories" repos.Length
-    //for (name,url) in repos do
-    //    let outPath = Path.Combine(scratchFolder, name)
-    //    if Directory.Exists outPath then
-    //        log.startTimed "update %s" name
-    //        Proc.exec (Some outPath) "git" ["fetch"; "origin"]
-    //        Proc.exec (Some outPath) "git" ["reset"; "--hard"; "origin/master"]
-    //        Proc.exec (Some outPath) "git" ["clean"; "-xdf"]
-    //        log.stop()
-
-    //    else 
-    //        log.startTimed "cloning %s" name
-    //        Proc.exec None "git" ["clone"; url; outPath]
-    //        log.stop()
-
-    //    let deps, created = RepoInfo.tryOfRepo outPath
-    //    log.start "dependencies"
-    //    for (k,v) in Map.toSeq deps do
-    //        log.line "%s ~> %A" k v
-    //    log.stop()
-
-    //    log.start "created"
-    //    for id in created do
-    //        log.line "%s" id
-    //    log.stop()
-
-    //log.stop()
-
-    log.startTimed "yeah"
+    log.startTimed "running"
     let mutable repos = Map.empty
     for dir in Directory.GetDirectories scratchFolder do
         log.start "updating %s" (Path.GetFileName dir)
@@ -471,36 +435,49 @@ let main argv =
             log.line "%s" name
 
 
+
     let affectedRepos =
-        newPackageVersions 
-        |> Map.toSeq
-        |> Seq.fold (fun m (name,_) ->
-            match Map.tryFind name neededBy with
-            | Some r -> 
-                let mutable m = m
-                for (k,v) in Map.toSeq r do 
-                    match Map.tryFind k m with
+        let rec affectedRepos (m : Map<string, Map<string, VersionRequirement>>) (packages : Set<string>) =
+            let newRepos =
+                packages
+                |> Seq.fold (fun m name ->
+                    match Map.tryFind name neededBy with
                     | Some r -> 
-                        m <- Map.add k (Map.add name v r) m
-                    | None -> 
-                        m <- Map.add k (Map.ofList [name, v]) m
-                m
-            | None -> m
-        ) Map.empty
+                        let mutable m = m
+                        for (k,v) in Map.toSeq r do 
+                            match Map.tryFind k m with
+                            | Some r -> 
+                                m <- Map.add k (Map.add name v r) m
+                            | None -> 
+                                m <- Map.add k (Map.ofList [name, v]) m
+                        m
+                    | None -> m
+                ) m
+
+            let allPackages = newRepos |> Map.toSeq |> Seq.collect (fun (n,_) -> repos.[n].creates) |> Set.ofSeq
+            let newPackages = Set.difference allPackages packages
+            if Set.isEmpty newPackages then newRepos
+            else affectedRepos newRepos (Set.union packages allPackages)
+
+        affectedRepos Map.empty (Set.ofSeq (Seq.map fst (Map.toSeq newPackageVersions)))
 
     for (repo, req) in Map.toSeq affectedRepos do
         log.start "%s" repo
         for (name, req) in Map.toSeq req do
-            let newVersion = newPackageVersions.[name]
-            if req.IsConflicting newVersion then
-                let rs = req.ToString()
-                log.line "%s: %s" name rs
-            else
-                let rs = req.ToString()
-                log.line "%s: %s (already compatible)" name rs
-
+            match Map.tryFind name newPackageVersions with
+            | Some newVersion ->
+                if req.IsConflicting newVersion then
+                    let rs = req.ToString()
+                    log.line "%s: %s" name rs
+                else
+                    let rs = req.ToString()
+                    log.line "%s: %s (already compatible)" name rs
+            | None ->
+                log.line "%s: (transitive)" name
+                
         log.stop()
             
+    //Environment.Exit 0
     let intersect (o : VersionRange) (n : VersionRange) =
         if o.IsIncludedIn n then o
         elif n.IsIncludedIn o then n
@@ -548,7 +525,6 @@ let main argv =
                 for (k, v) in Map.toSeq updated do
                     log.line "%s: %A" k (string v)
                 log.stop()
-                Environment.Exit 0
 
                 deps.Save()
 
@@ -569,8 +545,8 @@ let main argv =
                             Console.ReadLine() |> ignore
                             install 0
 
-                log.stop()
                 install 0
+                log.stop()
 
                 let rec build() =
                     try
@@ -601,7 +577,7 @@ let main argv =
                         log.line "could not push %s" repo.name
                         log.line "please fix and press enter to continue"
                         push()
-                push()
+                //push()
                 log.stop()
             
                 log.start "push packages"
@@ -614,7 +590,7 @@ let main argv =
                         Console.ReadLine() |> ignore
                         pushMinor()
 
-                pushMinor()
+                //pushMinor()
                 log.stop()
 
             let info = RepoInfo.tryOfRepo path |> Option.get

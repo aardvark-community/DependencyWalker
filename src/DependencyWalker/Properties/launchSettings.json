@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "DependencyWalker": {
+      "commandName": "Project",
+      "commandLineArgs": "C:\\Users\\Schorsch\\Desktop\\buildtest \"nuget FSharp.Core ~> 4.6.2\""
+    }
+  }
+}
