@@ -577,20 +577,27 @@ let main argv =
                         log.line "could not push %s" repo.name
                         log.line "please fix and press enter to continue"
                         push()
-                //push()
+                push()
                 log.stop()
             
                 log.start "push packages"
                 let rec pushMinor() =
                     try
-                        Proc.execPrint log (Some path) "cmd.exe" ["/C"; "build.cmd"; "PushMinor"] |> ignore
+                        Proc.execPrint log (Some path) "cmd.exe" ["/C"; "build.cmd"; "Push"] |> ignore
                     with _ ->
                         log.line "could not build %s" repo.name
                         log.line "please fix and press enter to continue"
                         Console.ReadLine() |> ignore
                         pushMinor()
 
-                //pushMinor()
+                let newVersion = 
+                    let c: SemVerInfo = repo.currentTag.Value
+                    { c with Patch = c.Patch + 1u; Build = bigint 0; Original = None; PreRelease = None; BuildMetaData = "" }
+                let newVersion = string newVersion
+                Proc.exec (Some path) "git" ["tag"; "-a"; newVersion; "-m"; sprintf "\"%s\"" newVersion]
+                
+                pushMinor()
+                Proc.exec (Some path) "git" ["push"; "origin"; "master"; "--tags"]
                 log.stop()
 
             let info = RepoInfo.tryOfRepo path |> Option.get
